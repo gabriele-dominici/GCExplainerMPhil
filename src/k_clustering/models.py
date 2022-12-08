@@ -348,6 +348,57 @@ class Reddit_GCN(torch.nn.Module):
 
         return x
 
+class BA_Shapes_GCN_edge(nn.Module):
+    def __init__(self, num_in_features, num_hidden_features, num_classes, name):
+        super(BA_Shapes_GCN_edge, self).__init__()
+
+        self.name = name
+
+        self.conv0 = GCNConv(num_in_features, num_hidden_features)
+        self.conv1 = GCNConv(num_hidden_features, num_hidden_features)
+        self.conv2 = GCNConv(num_hidden_features, num_hidden_features)
+        self.conv3 = GCNConv(num_hidden_features, num_hidden_features)
+
+        self.linear1 = nn.Linear(num_hidden_features * 2, num_hidden_features)
+        # self.linear12 = nn.Linear(num_hidden_features * 2, num_hidden_features)
+        self.linear2 = nn.Linear(num_hidden_features, num_classes)
+
+    def forward(self, x, edge_index, pos_edges, neg_edges, mode="linear"):
+        x = self.conv0(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv3(x, edge_index)
+        # x = F.relu(x)
+
+        if mode == "dot":
+            x1 = (x[pos_edges[0]] * x[pos_edges[1]]).sum(dim=-1)
+            x2 = (x[neg_edges[0]] * x[neg_edges[1]]).sum(dim=-1)
+            x = torch.cat([x1, x2], 0)
+        else:
+            x1 = torch.cat([x[pos_edges[0]], x[pos_edges[1]]], 1)
+            x2 = torch.cat([x[neg_edges[0]], x[neg_edges[1]]], 1)
+            # x3 = torch.cat([x[pos_edges[1]], x[pos_edges[0]]], 1) #
+            # x4 = torch.cat([x[neg_edges[1]], x[neg_edges[0]]], 1) #
+            x = torch.cat([x1, x2], 0)
+            # x2 = torch.cat([x3, x4], 0) #
+            x = self.linear1(x)
+            # x1 = F.relu(x1)
+            # x2 = self.linear1(x2) #
+            # x2 = F.relu(x2) #
+            # x = torch.cat([x1, x2], 1) #
+            # x = self.linear12(x)
+            x = F.relu(x)
+            x = self.linear2(x)
+
+            x = x.squeeze(1)
+            # x1, x2 = F.log_softmax(x1, dim=-1), F.log_softmax(x2, dim=-1)
+        return x
 
 global activation_list
 activation_list = {}
@@ -558,7 +609,7 @@ def train(model, data, epochs, lr, path, mode='node'):
 
             with torch.no_grad():
 
-                edges_test = torch.cat([edges, to_undirected(train_pos)], 1)
+                edges_test = torch.cat([edges, train_pos], 1)
                 out_test = model(x, edges_test, test_pos, test_neg, mode='linear')
 
                 # out_test = torch.cat([pos_score_test, neg_score_test])

@@ -20,6 +20,8 @@ import scipy.cluster.hierarchy as hierarchy
 import torch_geometric
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import DataLoader, DenseDataLoader
+from torch_geometric.utils import train_test_split_edges
+from torch_geometric.data import Data
 
 from models import *
 
@@ -110,6 +112,60 @@ def prepare_syn_data(G, labels, train_split, if_adj=False):
     print("Number of edges: ", len(edges))
 
     return {"x": features, "y": labels, "edges": edges, "edge_list": edge_list, "train_mask": train_mask, "test_mask": test_mask}
+
+def prepare_syn_data_edges(G, labels, train_split, if_adj=False):
+    existing_node = list(G.nodes)[-1]
+    feat_dim = G.nodes[existing_node]["feat"].size
+    features = np.zeros((G.number_of_nodes(), feat_dim), dtype=float)
+    for i, u in enumerate(G.nodes()):
+        features[i, :] = G.nodes[u]["feat"]
+
+    features = torch.from_numpy(features).float()
+    labels = torch.from_numpy(labels)
+
+    edge_list = torch.from_numpy(np.array(G.edges))
+
+    edges = edge_list.transpose(0, 1).long()
+    if if_adj:
+        edges = torch.tensor(nx.to_numpy_matrix(G), requires_grad=True, dtype=torch.float)
+
+    data = Data(x=features, edge_index=edges)
+    torch.manual_seed(0)
+    data = train_test_split_edges(data, val_ratio=train_split*0.2, test_ratio=1-train_split)
+
+    print("Task: Node Classification")
+    print("Number of features: ", len(features))
+    print("Number of labels: ", len(labels))
+    print("Number of classes: ", len(set(labels)))
+    print("Number of edges: ", len(edges))
+
+    # complete_list_neg_edges = []
+    # for index_i, i in enumerate(data['train_neg_adj_mask']):
+    #     for index_j, j in enumerate(i):
+    #         if i[index_j]:
+    #             complete_list_neg_edges += [[index_i, index_j]]
+
+    # tmp_test_neg = data['test_neg_edge_index'].transpose(0, 1).long().tolist()
+    # tmp_test_pos = data['test_pos_edge_index'].transpose(0, 1).long().tolist()
+    #
+    # complete_list_neg_edges = [i for i in complete_list_neg_edges if i not in tmp_test_neg and i not in tmp_test_pos]
+
+    # complete_list_neg_edges = np.array(complete_list_neg_edges)
+    # subset_train_neg_edges = complete_list_neg_edges[np.random.choice(complete_list_neg_edges.shape[0],
+    #                                                                   int(data['train_pos_edge_index'].shape[1]),
+    #                                                                   replace=False)]
+
+    # return {"x": features, "y": labels, "edges": edges, "edge_list": edge_list,
+    #         "train_pos_edge_index": data['train_pos_edge_index'],
+    #         "train_neg_edge_index": torch.from_numpy(subset_train_neg_edges).transpose(0, 1).long(),
+    #         "test_neg_edge_index": data['test_neg_edge_index'],
+    #         "test_pos_edge_index": data['test_pos_edge_index']}
+    return {"x": features, "y": labels, "edges": data['train_pos_edge_index'],
+            "edge_list": data['train_pos_edge_index'].transpose(0, 1).long(),
+            "train_pos_edge_index": data['val_pos_edge_index'],
+            "train_neg_edge_index": data['val_neg_edge_index'],
+            "test_neg_edge_index": data['test_neg_edge_index'],
+            "test_pos_edge_index": data['test_pos_edge_index']}
 
 def prepare_real_data(graphs, train_split, batch_size, dataset_str):
     graphs = graphs.shuffle()
