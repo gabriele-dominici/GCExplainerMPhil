@@ -96,7 +96,7 @@ def prepare_syn_data(G, labels, train_split, if_adj=False):
 
     edge_list = torch.from_numpy(np.array(G.edges))
 
-    edges = edge_list.transpose(0, 1)
+    edges = edge_list.transpose(0, 1).long()
     if if_adj:
         edges = torch.tensor(nx.to_numpy_matrix(G), requires_grad=True, dtype=torch.float)
 
@@ -339,6 +339,9 @@ def plot_samples(clustering_model, data, y, layer_num, k, clustering_type, reduc
     return sample_graphs, sample_feat
 
 
+
+
+
 # def plot_samples(clustering_model, data, y, layer_num, k, clustering_type, reduction_type, num_nodes_view, edges, num_expansions, path, graph_data=None):
 #     res_sorted = get_node_distances(clustering_model, data)
 #
@@ -463,6 +466,7 @@ def prepare_output_paths(dataset_name, k):
     path_hc = os.path.join(path, f"HC")
     path_ward = os.path.join(path, f"WARD")
     path_dbscan = os.path.join(path, f"DBSCAN")
+    path_edges = os.path.join(path, f"edges")
     os.makedirs(path, exist_ok=True)
     os.makedirs(path_tsne, exist_ok=True)
     os.makedirs(path_pca, exist_ok=True)
@@ -471,5 +475,7 @@ def prepare_output_paths(dataset_name, k):
     os.makedirs(path_hc, exist_ok=True)
     os.makedirs(path_ward, exist_ok=True)
     os.makedirs(path_dbscan, exist_ok=True)
+    os.makedirs(path_edges, exist_ok=True)
 
-    return {"base": path, "TSNE": path_tsne, "PCA": path_pca, "UMAP": path_umap, "KMeans": path_kmeans, "HC": path_hc, "Ward": path_ward, "DBSCAN": path_dbscan}
+    return {"base": path, "TSNE": path_tsne, "PCA": path_pca, "UMAP": path_umap, "KMeans": path_kmeans, "HC": path_hc,
+            "Ward": path_ward, "DBSCAN": path_dbscan, "edges": path_edges}
