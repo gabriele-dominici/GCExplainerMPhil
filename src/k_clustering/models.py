@@ -30,11 +30,9 @@ class BA_Shapes_GCN(nn.Module):
 
     def forward(self, x, edge_index):
         x = self.conv0(x, edge_index)
-        print(x.shape)
         x = F.relu(x)
 
         x = self.conv1(x, edge_index)
-        print(x.shape)
         x = F.relu(x)
 
         x = self.conv2(x, edge_index)
@@ -380,10 +378,6 @@ class BA_Shapes_GCN_edge(nn.Module):
             x1 = (x[pos_edges[0]] * x[pos_edges[1]]).sum(dim=-1)
             x2 = (x[neg_edges[0]] * x[neg_edges[1]]).sum(dim=-1)
             x = torch.cat([x1, x2], 0)
-        elif mode == 'all':
-            print(torch.stack(
-                torch.meshgrid(x, x)
-            ).T.reshape(-1, 2).shape())
         else:
             x1 = torch.cat([x[pos_edges[0]], x[pos_edges[1]]], 1)
             x2 = torch.cat([x[neg_edges[0]], x[neg_edges[1]]], 1)
@@ -493,6 +487,7 @@ def train(model, data, epochs, lr, path):
 
             # calculate loss
             loss = F.nll_loss(out[train_mask], y[train_mask])
+
             loss.backward()
             optimizer.step()
 
@@ -543,129 +538,129 @@ def train(model, data, epochs, lr, path):
 def acc(pred, labels):
     acc = BinaryAccuracy()
     return acc(pred, labels)
-def train(model, data, epochs, lr, path, mode='node'):
-    # register hooks to track activation
-    model = register_hooks(model)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-
-    # list of accuracies
-    train_accuracies, test_accuracies, train_losses, test_losses = list(), list(), list(), list()
-
-    # get data
-    x = data["x"]
-    edges = data["edges"]
-    if mode == 'node':
-        y = data["y"]
-        train_mask = data["train_mask"]
-        test_mask = data["test_mask"]
-
-        # iterate for number of epochs
-        for epoch in range(epochs):
-                # set mode to training
-                model.train()
-                optimizer.zero_grad()
-
-                # input data
-                out = model(x, edges)
-
-                # calculate loss
-                loss = F.nll_loss(out[train_mask], y[train_mask])
-                loss.backward()
-                optimizer.step()
-
-                with torch.no_grad():
-                    test_loss = F.nll_loss(out[test_mask], y[test_mask])
-
-                    # get accuracy
-                    train_acc = test(model, x, y, edges, train_mask)
-                    test_acc = test(model, x, y, edges, test_mask)
-
-                ## add to list and print
-                train_accuracies.append(train_acc)
-                test_accuracies.append(test_acc)
-                train_losses.append(loss.item())
-                test_losses.append(test_loss.item())
-
-                print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
-                      format(epoch, loss.item(), train_acc, test_acc), end = "\r")
-
-                if train_acc >= 0.95 and test_acc >= 0.95:
-                    break
-    elif mode == 'edge':
-        train_pos = data['train_pos_edge_index']
-        train_neg = data['train_neg_edge_index']
-        test_pos = data['test_pos_edge_index']
-        test_neg = data['test_neg_edge_index']
-
-        # iterate for number of epochs
-        for epoch in range(epochs):
-            # set mode to training
-            model.train()
-            optimizer.zero_grad()
-
-            # input data
-            out = model(x, edges, train_pos, train_neg, mode='linear')
-
-            # out = torch.cat([pos_score, neg_score])
-            labels = torch.cat([torch.ones(int(out.shape[0]/2)), torch.zeros(int(out.shape[0]/2))])
-
-            # calculate loss
-            loss = F.binary_cross_entropy_with_logits(out, labels)
-            loss.backward()
-            optimizer.step()
-
-            with torch.no_grad():
-
-                edges_test = torch.cat([edges, train_pos], 1)
-                out_test = model(x, edges_test, test_pos, test_neg, mode='linear')
-
-                # out_test = torch.cat([pos_score_test, neg_score_test])
-                labels_test = torch.cat([torch.ones(int(out_test.shape[0]/2)), torch.zeros(int(out_test.shape[0]/2))])
-                test_loss = F.binary_cross_entropy_with_logits(out_test, labels_test)
-
-                # get accuracy
-                train_acc = float(acc(out, labels))
-                test_acc = float(acc(out_test, labels_test))
-
-            ## add to list and print
-            train_accuracies.append(train_acc)
-            test_accuracies.append(test_acc)
-            train_losses.append(loss.item())
-            test_losses.append(test_loss.item())
-
-            print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
-                  format(epoch, loss.item(), train_acc, test_acc), end="\r")
-
-            if train_acc >= 0.95 and test_acc >= 0.95:
-                break
-
-
-    # plut accuracy graph
-    plt.plot(train_accuracies, label="Train Accuracy")
-    plt.plot(test_accuracies, label="Testing Accuracy")
-    plt.title(f"Accuracy of {model.name} Model during Training")
-    plt.xlabel("Epoch")
-    plt.ylabel("Accuracy")
-    plt.legend(loc='upper right')
-    plt.savefig(os.path.join(path, f"model_accuracy_plot.png"))
-    plt.show()
-
-    plt.plot(train_losses, label="Train Loss")
-    plt.plot(test_losses, label="Testing Loss")
-    plt.title(f"Loss of {model.name} Model during Training")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend(loc='upper right')
-    plt.savefig(os.path.join(path, f"model_loss_plot.png"))
-    plt.show()
-
-    # save model
-    torch.save(model.state_dict(), os.path.join(path, "model.pkl"))
-
-    with open(os.path.join(path, "activations.txt"), 'wb') as file:
-        pickle.dump(activation_list, file)
-
-
+# def train(model, data, epochs, lr, path, mode='node'):
+#     # register hooks to track activation
+#     model = register_hooks(model)
+#     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+#
+#     # list of accuracies
+#     train_accuracies, test_accuracies, train_losses, test_losses = list(), list(), list(), list()
+#
+#     # get data
+#     x = data["x"]
+#     edges = data["edges"]
+#     if mode == 'node':
+#         y = data["y"]
+#         train_mask = data["train_mask"]
+#         test_mask = data["test_mask"]
+#
+#         # iterate for number of epochs
+#         for epoch in range(epochs):
+#                 # set mode to training
+#                 model.train()
+#                 optimizer.zero_grad()
+#
+#                 # input data
+#                 out = model(x, edges)
+#
+#                 # calculate loss
+#                 loss = F.nll_loss(out[train_mask], y[train_mask])
+#                 loss.backward()
+#                 optimizer.step()
+#
+#                 with torch.no_grad():
+#                     test_loss = F.nll_loss(out[test_mask], y[test_mask])
+#
+#                     # get accuracy
+#                     train_acc = test(model, x, y, edges, train_mask)
+#                     test_acc = test(model, x, y, edges, test_mask)
+#
+#                 ## add to list and print
+#                 train_accuracies.append(train_acc)
+#                 test_accuracies.append(test_acc)
+#                 train_losses.append(loss.item())
+#                 test_losses.append(test_loss.item())
+#
+#                 print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
+#                       format(epoch, loss.item(), train_acc, test_acc), end = "\r")
+#
+#                 if train_acc >= 0.95 and test_acc >= 0.95:
+#                     break
+#     elif mode == 'edge':
+#         train_pos = data['train_pos_edge_index']
+#         train_neg = data['train_neg_edge_index']
+#         test_pos = data['test_pos_edge_index']
+#         test_neg = data['test_neg_edge_index']
+#
+#         # iterate for number of epochs
+#         for epoch in range(epochs):
+#             # set mode to training
+#             model.train()
+#             optimizer.zero_grad()
+#
+#             # input data
+#             out = model(x, edges, train_pos, train_neg, mode='linear')
+#
+#             # out = torch.cat([pos_score, neg_score])
+#             labels = torch.cat([torch.ones(int(out.shape[0]/2)), torch.zeros(int(out.shape[0]/2))])
+#
+#             # calculate loss
+#             loss = F.binary_cross_entropy_with_logits(out, labels)
+#             loss.backward()
+#             optimizer.step()
+#
+#             with torch.no_grad():
+#
+#                 edges_test = torch.cat([edges, train_pos], 1)
+#                 out_test = model(x, edges_test, test_pos, test_neg, mode='linear')
+#
+#                 # out_test = torch.cat([pos_score_test, neg_score_test])
+#                 labels_test = torch.cat([torch.ones(int(out_test.shape[0]/2)), torch.zeros(int(out_test.shape[0]/2))])
+#                 test_loss = F.binary_cross_entropy_with_logits(out_test, labels_test)
+#
+#                 # get accuracy
+#                 train_acc = float(acc(out, labels))
+#                 test_acc = float(acc(out_test, labels_test))
+#
+#             ## add to list and print
+#             train_accuracies.append(train_acc)
+#             test_accuracies.append(test_acc)
+#             train_losses.append(loss.item())
+#             test_losses.append(test_loss.item())
+#
+#             print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
+#                   format(epoch, loss.item(), train_acc, test_acc), end="\r")
+#
+#             if train_acc >= 0.95 and test_acc >= 0.95:
+#                 break
+#
+#
+#     # plut accuracy graph
+#     plt.plot(train_accuracies, label="Train Accuracy")
+#     plt.plot(test_accuracies, label="Testing Accuracy")
+#     plt.title(f"Accuracy of {model.name} Model during Training")
+#     plt.xlabel("Epoch")
+#     plt.ylabel("Accuracy")
+#     plt.legend(loc='upper right')
+#     plt.savefig(os.path.join(path, f"model_accuracy_plot.png"))
+#     plt.show()
+#
+#     plt.plot(train_losses, label="Train Loss")
+#     plt.plot(test_losses, label="Testing Loss")
+#     plt.title(f"Loss of {model.name} Model during Training")
+#     plt.xlabel("Epoch")
+#     plt.ylabel("Loss")
+#     plt.legend(loc='upper right')
+#     plt.savefig(os.path.join(path, f"model_loss_plot.png"))
+#     plt.show()
+#
+#     # save model
+#     torch.save(model.state_dict(), os.path.join(path, "model.pkl"))
+#
+#     with open(os.path.join(path, "activations.txt"), 'wb') as file:
+#         pickle.dump(activation_list, file)
+#
+#
 
 def test_graph_class(model, dataloader):
     # enter evaluation mode
