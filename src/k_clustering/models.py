@@ -380,6 +380,10 @@ class BA_Shapes_GCN_edge(nn.Module):
             x1 = (x[pos_edges[0]] * x[pos_edges[1]]).sum(dim=-1)
             x2 = (x[neg_edges[0]] * x[neg_edges[1]]).sum(dim=-1)
             x = torch.cat([x1, x2], 0)
+        elif mode == 'all':
+            print(torch.stack(
+                torch.meshgrid(x, x)
+            ).T.reshape(-1, 2).shape())
         else:
             x1 = torch.cat([x[pos_edges[0]], x[pos_edges[1]]], 1)
             x2 = torch.cat([x[neg_edges[0]], x[neg_edges[1]]], 1)
@@ -448,15 +452,18 @@ def test(model, node_data_x, node_data_y, edge_list, mask):
     correct += pred[mask].eq(node_data_y[mask]).sum().item()
     return correct / (len(node_data_y[mask]))
 
-def test_edge(model, node_data_x, edge_list, edge_pos, edge_neg, mode='linear'):
+def test_edge(model, node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test, mode='linear', train=True):
     # enter evaluation mode
     model.eval()
 
-    out_test = model(node_data_x, edge_list, edge_pos, edge_neg, mode=mode)
+    out_train, out_test = model(node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test, mode=mode)
     # out_test = torch.cat([pos_score_test, neg_score_test])
-    labels_test = torch.cat([torch.ones(int(out_test.shape[0]/2)), torch.zeros(int(out_test.shape[0]/2))])
-
-    accuracy = acc(out_test, labels_test)
+    if train:
+        labels = torch.cat([torch.ones(int(out_train.shape[0]/2)), torch.zeros(int(out_train.shape[0]/2))])
+        accuracy = acc(out_train, labels)
+    else:
+        labels = torch.cat([torch.ones(int(out_test.shape[0]/2)), torch.zeros(int(out_test.shape[0]/2))])
+        accuracy = acc(out_test, labels)
     return accuracy
 
 
