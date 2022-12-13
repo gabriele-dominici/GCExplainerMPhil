@@ -538,6 +538,8 @@ def train(model, data, epochs, lr, path):
 def acc(pred, labels):
     acc = BinaryAccuracy()
     return acc(pred, labels)
+
+
 # def train(model, data, epochs, lr, path, mode='node'):
 #     # register hooks to track activation
 #     model = register_hooks(model)
