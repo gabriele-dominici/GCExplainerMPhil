@@ -16,7 +16,7 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances_argmin_min, pairwise_distances
 from sklearn.neighbors import NearestCentroid
 import scipy.cluster.hierarchy as hierarchy
-
+import random
 import torch_geometric
 from torch_geometric.datasets import TUDataset
 from torch_geometric.data import DataLoader, DenseDataLoader
@@ -210,6 +210,120 @@ def prepare_syn_data_edge_classification(G, labels, train_split, if_adj=False):
     print("Number of edges: ", len(edges))
 
     return {"x": features, "y": labels, "edges": edges, "edge_list": edge_list, "train_mask": train_mask, "test_mask": test_mask}
+
+def prepare_syn_data_edges_multiclass(G, labels, train_split, num_classes, if_adj=False):
+    existing_node = list(G.nodes)[-1]
+    feat_dim = G.nodes[existing_node]["feat"].size
+    features = np.zeros((G.number_of_nodes(), feat_dim), dtype=float)
+    for i, u in enumerate(G.nodes()):
+        features[i, :] = G.nodes[u]["feat"]
+
+    features = torch.from_numpy(features).float()
+    node_labels = torch.from_numpy(labels)
+
+    edge_list = torch.from_numpy(np.array(G.edges))
+
+    edges = edge_list.transpose(0, 1).long()
+    if if_adj:
+        edges = torch.tensor(nx.to_numpy_matrix(G), requires_grad=True, dtype=torch.float)
+
+    data = Data(x=features, edge_index=edges)
+    torch.manual_seed(0)
+    data = train_test_split_edges(data, val_ratio=train_split*0.2, test_ratio=1-train_split)
+
+    print("Task: Node Classification")
+    print("Number of features: ", len(features))
+    print("Number of labels: ", len(node_labels))
+    print("Number of classes: ", len(set(node_labels)))
+    print("Number of edges: ", len(edges))
+
+    train_labels = []
+    test_labels = []
+    to_add = [[],[]]
+    final_train_edges = [[],[]]
+    final_test_edges = [[],[]]
+    train_pos = data['val_pos_edge_index']
+    train_neg = data['val_neg_edge_index']
+    train_neg = train_neg[:, :int(train_neg.shape[1]/num_classes)]
+    test_pos = data['test_pos_edge_index']
+    test_neg = data['test_neg_edge_index']
+    test_neg = test_neg[:, :int(test_neg.shape[1]/num_classes)]
+
+    for index in range(train_pos.shape[1]):
+        a = train_pos[0][index]
+        b = train_pos[1][index]
+
+        if node_labels[a] == 1 and node_labels[b] == 1:
+            train_labels += [2]
+            final_train_edges[0] += [a]
+            final_train_edges[1] += [b]
+        elif node_labels[a] == 2 and node_labels[b] == 2:
+            train_labels += [3]
+            final_train_edges[0] += [a]
+            final_train_edges[1] += [b]
+        elif (node_labels[a] == 1 and node_labels[b] == 3) or (node_labels[a] == 3 and node_labels[b] == 1):
+            train_labels += [4]
+            final_train_edges[0] += [a]
+            final_train_edges[1] += [b]
+        elif (node_labels[a] == 1 and node_labels[b] == 2) or (node_labels[a] == 2 and node_labels[b] == 1):
+            train_labels += [5]
+            final_train_edges[0] += [a]
+            final_train_edges[1] += [b]
+        elif random.random() > 0.8:
+            train_labels += [1]
+            final_train_edges[0] += [a]
+            final_train_edges[1] += [b]
+        else:
+            to_add[0] += [a]
+            to_add[1] += [b]
+
+    train_labels = torch.tensor(train_labels).long()
+    train_labels = torch.cat([train_labels, torch.zeros(train_neg.shape[1]).long()])
+    final_train_edges = torch.tensor(final_train_edges).long()
+
+    for index in range(test_pos.shape[1]):
+        a = test_pos[0][index]
+        b = test_pos[1][index]
+
+        if node_labels[a] == 1 and node_labels[b] == 1:
+            test_labels += [2]
+            final_test_edges[0] += [a]
+            final_test_edges[1] += [b]
+        elif node_labels[a] == 2 and node_labels[b] == 2:
+            test_labels += [3]
+            final_test_edges[0] += [a]
+            final_test_edges[1] += [b]
+        elif (node_labels[a] == 1 and node_labels[b] == 3) or (node_labels[a] == 3 and node_labels[b] == 1):
+            test_labels += [4]
+            final_test_edges[0] += [a]
+            final_test_edges[1] += [b]
+        elif (node_labels[a] == 1 and node_labels[b] == 2) or (node_labels[a] == 2 and node_labels[b] == 1):
+            test_labels += [5]
+            final_test_edges[0] += [a]
+            final_test_edges[1] += [b]
+        elif random.random() > 0.8:
+            test_labels += [1]
+            final_test_edges[0] += [a]
+            final_test_edges[1] += [b]
+        else:
+            to_add[0] += [a]
+            to_add[1] += [b]
+
+    test_labels = torch.tensor(test_labels).long()
+    test_labels = torch.cat([test_labels, torch.zeros(test_neg.shape[1]).long()])
+    final_test_edges = torch.tensor(final_test_edges).long()
+
+    to_add = torch.tensor(to_add).long()
+
+    edges = torch.cat([data['train_pos_edge_index'], to_add], dim=1)
+
+    return {"x": features, "y_train": train_labels, "y_test": test_labels, "edges": edges,
+            "edge_list": edges.transpose(0, 1).long(),
+            "train_pos_edge_index": final_train_edges,
+            "train_neg_edge_index": train_neg,
+            "test_pos_edge_index": final_test_edges,
+            "test_neg_edge_index": test_neg,
+            }
 
 def prepare_real_data(graphs, train_split, batch_size, dataset_str):
     graphs = graphs.shuffle()

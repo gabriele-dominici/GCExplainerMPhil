@@ -533,6 +533,17 @@ def test_edge(model, node_data_x, edge_list, edge_pos_train, edge_neg_train, edg
         accuracy = acc(out_test, labels)
     return accuracy
 
+def test_edge_multiclass(model, node_data_x, labels, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test, num_classes, mode='linear', train=True):
+    # enter evaluation mode
+    model.eval()
+
+    out_train, out_test = model(node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test)
+    # out_test = torch.cat([pos_score_test, neg_score_test])
+    if train:
+        accuracy = multi_acc(out_train, labels, num_classes)
+    else:
+        accuracy = multi_acc(out_test, labels, num_classes)
+    return accuracy
 
 # def train(model, data, epochs, lr, path):
 #     # register hooks to track activation
