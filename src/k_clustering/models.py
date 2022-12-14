@@ -45,6 +45,51 @@ class BA_Shapes_GCN(nn.Module):
 
         return F.log_softmax(x, dim=-1)
 
+class BA_Shapes_GCN_edge(nn.Module):
+    def __init__(self, num_in_features, num_hidden_features, num_classes, name):
+        super(BA_Shapes_GCN_edge, self).__init__()
+
+        self.name = name
+
+        self.conv0 = GCNConv(num_in_features, num_hidden_features)
+        self.conv1 = GCNConv(num_hidden_features, num_hidden_features)
+        self.conv2 = GCNConv(num_hidden_features, num_hidden_features)
+        self.conv3 = GCNConv(num_hidden_features, num_hidden_features)
+
+        self.linear1 = nn.Linear(num_hidden_features * 2, num_hidden_features)
+        # self.linear12 = nn.Linear(num_hidden_features * 2, num_hidden_features)
+        self.linear2 = nn.Linear(num_hidden_features, num_classes)
+
+    def forward(self, x, edge_index, pos_edges_train, neg_edges_train, pos_edges_test, neg_edges_test):
+        x = self.conv0(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv3(x, edge_index)
+        # x = F.relu(x)
+
+        x1 = torch.cat([x[pos_edges_train[0]], x[pos_edges_train[1]]], 1)
+        x2 = torch.cat([x[neg_edges_train[0]], x[neg_edges_train[1]]], 1)
+        x3 = torch.cat([x[pos_edges_test[0]], x[pos_edges_test[1]]], 1) #
+        x4 = torch.cat([x[neg_edges_test[0]], x[neg_edges_test[1]]], 1) #
+        x_train = torch.cat([x1, x2], 0)
+        n_train = x_train.shape[0]
+        x_test = torch.cat([x3, x4], 0) #
+        n_test = x_test.shape[0]
+        x = torch.cat([x_train, x_test], 0)
+        x = self.linear1(x)
+        x = F.relu(x)
+        x = self.linear2(x)
+
+        x = x.squeeze(1)
+        return x[:n_train], x[n_train:]
+
+
 class BA_Shapes_GCN_edge_classification(nn.Module):
     def __init__(self, num_in_features, num_hidden_features, num_classes, name):
         super(BA_Shapes_GCN_edge_classification, self).__init__()
@@ -382,58 +427,6 @@ class Reddit_GCN(torch.nn.Module):
 
         return x
 
-class BA_Shapes_GCN_edge(nn.Module):
-    def __init__(self, num_in_features, num_hidden_features, num_classes, name):
-        super(BA_Shapes_GCN_edge, self).__init__()
-
-        self.name = name
-
-        self.conv0 = GCNConv(num_in_features, num_hidden_features)
-        self.conv1 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv2 = GCNConv(num_hidden_features, num_hidden_features)
-        self.conv3 = GCNConv(num_hidden_features, num_hidden_features)
-
-        self.linear1 = nn.Linear(num_hidden_features * 2, num_hidden_features)
-        # self.linear12 = nn.Linear(num_hidden_features * 2, num_hidden_features)
-        self.linear2 = nn.Linear(num_hidden_features, num_classes)
-
-    def forward(self, x, edge_index, pos_edges, neg_edges, mode="linear"):
-        x = self.conv0(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-
-        x = self.conv3(x, edge_index)
-        # x = F.relu(x)
-
-        if mode == "dot":
-            x1 = (x[pos_edges[0]] * x[pos_edges[1]]).sum(dim=-1)
-            x2 = (x[neg_edges[0]] * x[neg_edges[1]]).sum(dim=-1)
-            x = torch.cat([x1, x2], 0)
-        else:
-            x1 = torch.cat([x[pos_edges[0]], x[pos_edges[1]]], 1)
-            x2 = torch.cat([x[neg_edges[0]], x[neg_edges[1]]], 1)
-            # x3 = torch.cat([x[pos_edges[1]], x[pos_edges[0]]], 1) #
-            # x4 = torch.cat([x[neg_edges[1]], x[neg_edges[0]]], 1) #
-            x = torch.cat([x1, x2], 0)
-            # x2 = torch.cat([x3, x4], 0) #
-            x = self.linear1(x)
-            # x1 = F.relu(x1)
-            # x2 = self.linear1(x2) #
-            # x2 = F.relu(x2) #
-            # x = torch.cat([x1, x2], 1) #
-            # x = self.linear12(x)
-            x = F.relu(x)
-            x = self.linear2(x)
-
-            x = x.squeeze(1)
-            # x1, x2 = F.log_softmax(x1, dim=-1), F.log_softmax(x2, dim=-1)
-        return x
-
 global activation_list
 activation_list = {}
 
@@ -482,11 +475,11 @@ def test(model, node_data_x, node_data_y, edge_list, mask):
     correct += pred[mask].eq(node_data_y[mask]).sum().item()
     return correct / (len(node_data_y[mask]))
 
-def test_edge(model, node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test, mode='linear', train=True):
+def test_edge(model, node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test, train=True):
     # enter evaluation mode
     model.eval()
 
-    out_train, out_test = model(node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test, mode=mode)
+    out_train, out_test = model(node_data_x, edge_list, edge_pos_train, edge_neg_train, edge_pos_test, edge_neg_test)
     # out_test = torch.cat([pos_score_test, neg_score_test])
     if train:
         labels = torch.cat([torch.ones(int(out_train.shape[0]/2)), torch.zeros(int(out_train.shape[0]/2))])
@@ -638,7 +631,7 @@ def train(model, data, epochs, lr, path, mode='node'):
             optimizer.zero_grad()
 
             # input data
-            out, _ = model(x, edges, train_pos, train_neg, test_pos, test_neg, mode='linear')
+            out, _ = model(x, edges, train_pos, train_neg, test_pos, test_neg)
 
             # out = torch.cat([pos_score, neg_score])
             labels = torch.cat([torch.ones(int(out.shape[0]/2)), torch.zeros(int(out.shape[0]/2))])
@@ -651,7 +644,7 @@ def train(model, data, epochs, lr, path, mode='node'):
             with torch.no_grad():
 
                 edges_test = torch.cat([edges, train_pos], 1)
-                _, out_test = model(x, edges_test, train_pos, train_neg, test_pos, test_neg, mode='linear')
+                _, out_test = model(x, edges_test, train_pos, train_neg, test_pos, test_neg)
 
                 # out_test = torch.cat([pos_score_test, neg_score_test])
                 labels_test = torch.cat([torch.ones(int(out_test.shape[0]/2)), torch.zeros(int(out_test.shape[0]/2))])
