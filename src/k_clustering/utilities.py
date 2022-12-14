@@ -167,6 +167,50 @@ def prepare_syn_data_edges(G, labels, train_split, if_adj=False):
             "test_neg_edge_index": data['test_neg_edge_index'],
             "test_pos_edge_index": data['test_pos_edge_index']}
 
+def prepare_syn_data_edge_classification(G, labels, train_split, if_adj=False):
+    existing_node = list(G.nodes)[-1]
+    feat_dim = G.nodes[existing_node]["feat"].size
+    features = np.zeros((G.number_of_nodes(), feat_dim), dtype=float)
+    for i, u in enumerate(G.nodes()):
+        features[i, :] = G.nodes[u]["feat"]
+
+    features = torch.from_numpy(features).float()
+    node_labels = torch.from_numpy(labels)
+
+    edge_list = torch.from_numpy(np.array(G.edges))
+
+    edges = edge_list.transpose(0, 1).long()
+    if if_adj:
+        edges = torch.tensor(nx.to_numpy_matrix(G), requires_grad=True, dtype=torch.float)
+
+    labels = []
+    for index in range(edges.shape[1]):
+        a = edges[1][index]
+        b = edges[0][index]
+
+        if node_labels[a] == 1 and node_labels[b] == 1:
+            labels += [1]
+        elif node_labels[a] == 2 and node_labels[b] == 2:
+            labels += [2]
+        elif (node_labels[a] == 1 and node_labels[b] == 3) or (node_labels[a] == 3 and node_labels[b] == 1):
+            labels += [3]
+        elif (node_labels[a] == 1 and node_labels[b] == 2) or (node_labels[a] == 2 and node_labels[b] == 1):
+            labels += [4]
+        else:
+            labels += [0]
+
+    labels = torch.tensor(labels).long()
+    train_mask = np.random.rand(edges.shape[1]) < train_split
+    test_mask = ~train_mask
+
+    print("Task: Node Classification")
+    print("Number of features: ", len(features))
+    print("Number of labels: ", len(labels))
+    print("Number of classes: ", len(set(labels)))
+    print("Number of edges: ", len(edges))
+
+    return {"x": features, "y": labels, "edges": edges, "edge_list": edge_list, "train_mask": train_mask, "test_mask": test_mask}
+
 def prepare_real_data(graphs, train_split, batch_size, dataset_str):
     graphs = graphs.shuffle()
 
@@ -241,6 +285,132 @@ def plot_activation_space(data, labels, activation_type, layer_num, path, note="
 #     plt.savefig(os.path.join(path, f"{layer_num}layer_{data_type}{reduction_type}.png"))
 #     plt.show()
 
+def get_top_subgraphs_with_edges(top_indices, y, edges_list, edges, num_expansions, graph_data=None, graph_name=None):
+    graphs = []
+    color_maps = []
+    labels = []
+    node_labels = []
+
+    df = pd.DataFrame(edges_list)
+    for idx in top_indices:
+        # get neighbours
+        neighbours = list()
+        n1, n2 = edges[0][idx], edges[1][idx]
+        neighbours.append(n1)
+        neighbours.append(n2)
+
+        for i in range(0, num_expansions):
+            new_neighbours = list()
+            for e in edges_list:
+                if (e[0] in neighbours) or (e[1] in neighbours):
+                    new_neighbours.append(e[0])
+                    new_neighbours.append(e[1])
+
+            neighbours = neighbours + new_neighbours
+            neighbours = list(set(neighbours))
+
+        new_G = nx.Graph()
+        df_neighbours = df[(df[0].isin(neighbours)) & (df[1].isin(neighbours))]
+        remaining_edges = df_neighbours.to_numpy()
+        new_G.add_edges_from(remaining_edges)
+        # if y[idx] == 1:
+        #     new_G.add_edge(n1, n2)
+
+        color_map = []
+        node_label = {}
+        if graph_data is None:
+            for node in new_G:
+                if node in [n1, n2]:
+                    color_map.append('green')
+                else:
+                    color_map.append('pink')
+        else:
+            if graph_name == "Mutagenicity":
+                ids = ["C", "O", "Cl", "H", "N", "F", "Br", "S", "P", "I", "Na", "K", "Li", "Ca"]
+            elif graph_name == "REDDIT-BINARY":
+                ids = []
+
+            for node in zip(new_G):
+                node = node[0]
+                color_idx = graph_data[node]
+                color_map.append(color_idx)
+                node_label[node] = f"{ids[color_idx]}"
+
+        color_maps.append(color_map)
+        graphs.append(new_G)
+        labels.append(y[idx])
+        node_labels.append(node_label)
+
+    return graphs, color_maps, labels, node_labels
+
+def plot_samples_edges(clustering_model, data, y, layer_num, k, clustering_type, reduction_type, num_nodes_view, edges_list, edges,
+                       num_expansions, path, graph_data=None, graph_name=None):
+
+    res_sorted = get_node_distances(clustering_model, data)
+
+    if isinstance(num_nodes_view, int):
+        num_nodes_view = [num_nodes_view]
+    col = sum([abs(number) for number in num_nodes_view])
+
+    fig, axes = plt.subplots(k, col, figsize=(18, 3 * k + 2))
+    fig.suptitle(f'Nearest Instances to {clustering_type} Cluster Centroid for {reduction_type} Activations of Layer {layer_num}', y=1.005)
+
+    if graph_data is not None:
+        fig2, axes2 = plt.subplots(k, col, figsize=(18, 3 * k + 2))
+        fig2.suptitle(f'Nearest Instances to {clustering_type} Cluster Centroid for {reduction_type} Activations of Layer {layer_num} (by node index)', y=1.005)
+
+    l = list(range(0, k))
+    sample_graphs = []
+    sample_feat = []
+
+    for i, ax_list in zip(l, axes):
+        if isinstance(clustering_model, AgglomerativeClustering) or isinstance(clustering_model, DBSCAN):
+            distances = res_sorted[i]
+        elif isinstance(clustering_model, KMeans):
+            distances = res_sorted[:, i]
+
+        top_graphs, color_maps = [], []
+        for view in num_nodes_view:
+            if view < 0:
+                top_indices = np.argsort(distances)[::][view:]
+            else:
+                top_indices = np.argsort(distances)[::][:view]
+
+            tg, cm, labels, node_labels = get_top_subgraphs_with_edges(top_indices, y, edges_list, edges, num_expansions, graph_data, graph_name)
+            top_graphs = top_graphs + tg
+            color_maps = color_maps + cm
+
+        if graph_data is None:
+            for ax, new_G, color_map, g_label in zip(ax_list, top_graphs, color_maps, labels):
+                nx.draw(new_G, node_color=color_map, with_labels=True, ax=ax)
+                ax.set_title(f"label {g_label}", fontsize=14)
+        else:
+            for ax, new_G, color_map, g_label, n_labels in zip(ax_list, top_graphs, color_maps, labels, node_labels):
+                nx.draw(new_G, node_color=color_map, with_labels=True, ax=ax, labels=n_labels)
+                ax.set_title(f"label {g_label}", fontsize=14)
+
+            for ax, new_G, color_map, g_label, n_labels in zip(axes2[i], top_graphs, color_maps, labels, node_labels):
+                nx.draw(new_G, node_color=color_map, with_labels=True, ax=ax)
+                ax.set_title(f"label {g_label}", fontsize=14)
+
+        sample_graphs.append((top_graphs[0], top_indices[0]))
+        sample_feat.append(color_maps[0])
+
+    views = ''.join((str(i) + "_") for i in num_nodes_view)
+    if isinstance(clustering_model, AgglomerativeClustering):
+        fig.savefig(os.path.join(path, f"{k}h_{layer_num}layer_{clustering_type}_{views}view.png"))
+    else:
+        fig.savefig(os.path.join(path, f"{layer_num}layer_{clustering_type}_{reduction_type}_{views}view.png"))
+
+    if graph_data is not None:
+        if isinstance(clustering_model, AgglomerativeClustering):
+            fig2.savefig(os.path.join(path, f"{k}h_{layer_num}layer_{clustering_type}_{views}view_by_node.png"))
+        else:
+            fig2.savefig(os.path.join(path, f"{layer_num}layer_{clustering_type}_{reduction_type}_{views}view_by_node.png"))
+
+    plt.show()
+
+    return sample_graphs, sample_feat
 
 def get_top_subgraphs(top_indices, y, edges, num_expansions, graph_data=None, graph_name=None):
     graphs = []
