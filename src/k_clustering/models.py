@@ -12,7 +12,7 @@ from torch_geometric.nn import MessagePassing, GCNConv, DenseGCNConv, GINConv, G
 from torch_geometric.utils import add_self_loops, degree, to_dense_adj, convert, to_undirected
 from torch_geometric.nn import global_mean_pool, GlobalAttention, global_max_pool
 
-from torchmetrics.classification import BinaryAccuracy
+from torchmetrics.classification import BinaryAccuracy, MulticlassAccuracy, MulticlassConfusionMatrix
 
 class BA_Shapes_GCN(nn.Module):
     def __init__(self, num_in_features, num_hidden_features, num_classes, name):
@@ -126,6 +126,50 @@ class BA_Shapes_GCN_edge_classification(nn.Module):
         x = F.log_softmax(x, dim=-1)
 
         return x
+
+class BA_Shapes_GCN_edge_multiclass(nn.Module):
+    def __init__(self, num_in_features, num_hidden_features, num_classes, name):
+        super(BA_Shapes_GCN_edge_multiclass, self).__init__()
+
+        self.name = name
+
+        self.conv0 = GCNConv(num_in_features, num_hidden_features)
+        self.conv1 = GCNConv(num_hidden_features, num_hidden_features)
+        self.conv2 = GCNConv(num_hidden_features, num_hidden_features)
+        self.conv3 = GCNConv(num_hidden_features, num_hidden_features)
+
+        self.linear1 = nn.Linear(num_hidden_features * 2, num_hidden_features)
+        # self.linear12 = nn.Linear(num_hidden_features * 2, num_hidden_features)
+        self.linear2 = nn.Linear(num_hidden_features, num_classes)
+
+    def forward(self, x, edge_index, pos_edges_train, neg_edges_train, pos_edges_test, neg_edges_test, mode="linear"):
+        x = self.conv0(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv2(x, edge_index)
+        x = F.relu(x)
+
+        x = self.conv3(x, edge_index)
+        # x = F.relu(x)
+
+        x1 = torch.cat([x[pos_edges_train[0]], x[pos_edges_train[1]]], 1)
+        x2 = torch.cat([x[neg_edges_train[0]], x[neg_edges_train[1]]], 1)
+        x3 = torch.cat([x[pos_edges_test[0]], x[pos_edges_test[1]]], 1) #
+        x4 = torch.cat([x[neg_edges_test[0]], x[neg_edges_test[1]]], 1) #
+        x_train = torch.cat([x1, x2], 0)
+        n_train = x_train.shape[0]
+        x_test = torch.cat([x3, x4], 0) #
+        n_test = x_test.shape[0]
+        x = torch.cat([x_train, x_test], 0)
+        x = self.linear1(x)
+        x = F.relu(x)
+        x = self.linear2(x)
+
+        x = F.log_softmax(x, dim=-1)
+        return x[:n_train], x[n_train:]
 
 class BA_Community_GCN(nn.Module):
     def __init__(self, num_in_features, num_hidden_features, num_classes):
@@ -568,7 +612,9 @@ def acc(pred, labels):
     acc = BinaryAccuracy()
     return acc(pred, labels)
 
-
+def multi_acc(pred, labels, num_classes):
+    acc = MulticlassAccuracy(num_classes=num_classes, average='micro')
+    return acc(pred, labels)
 
 def train(model, data, epochs, lr, path, mode='node'):
     # register hooks to track activation
@@ -664,7 +710,56 @@ def train(model, data, epochs, lr, path, mode='node'):
 
             if train_acc >= 0.95 and test_acc >= 0.95:
                 break
+    elif mode == 'edge_multiclass':
+        train_pos = data['train_pos_edge_index']
+        train_neg = data['train_neg_edge_index']
+        test_pos = data['test_pos_edge_index']
+        test_neg = data['test_neg_edge_index']
+        train_labels = data['y_train']
+        num_classes = len(set(train_labels.tolist()))
+        test_labels = data['y_test']
 
+        # iterate for number of epochs
+        for epoch in range(epochs):
+            # set mode to training
+            model.train()
+            optimizer.zero_grad()
+
+            # input data
+            out, _ = model(x, edges, train_pos, train_neg, test_pos, test_neg, mode='linear')
+
+            # out = torch.cat([pos_score, neg_score])
+
+            # calculate loss
+            loss = F.nll_loss(out, train_labels)
+            loss.backward()
+            optimizer.step()
+
+            with torch.no_grad():
+
+                edges_test = torch.cat([edges, train_pos], 1)
+                _, out_test = model(x, edges_test, train_pos, train_neg, test_pos, test_neg, mode='linear')
+
+                # out_test = torch.cat([pos_score_test, neg_score_test])
+                test_loss = F.nll_loss(out_test, test_labels)
+
+                # get accuracy
+                train_acc = float(multi_acc(out, train_labels, num_classes))
+                test_acc = float(multi_acc(out_test, test_labels, num_classes))
+            ## add to list and print
+            train_accuracies.append(train_acc)
+            test_accuracies.append(test_acc)
+            train_losses.append(loss.item())
+            test_losses.append(test_loss.item())
+
+            print('Epoch: {:03d}, Loss: {:.5f}, Train Acc: {:.5f}, Test Acc: {:.5f}'.
+                  format(epoch, loss.item(), train_acc, test_acc), end="\r")
+
+            if train_acc >= 0.95 and test_acc >= 0.95:
+                break
+
+        metric = MulticlassConfusionMatrix(num_classes=num_classes)
+        print(metric(out_test, test_labels))
     # plut accuracy graph
     plt.plot(train_accuracies, label="Train Accuracy")
     plt.plot(test_accuracies, label="Testing Accuracy")
