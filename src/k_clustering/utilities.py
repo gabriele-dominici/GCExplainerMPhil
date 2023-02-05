@@ -209,7 +209,9 @@ def prepare_syn_data_edge_classification(G, labels, train_split, if_adj=False):
     print("Number of classes: ", len(set(labels)))
     print("Number of edges: ", len(edges))
 
-    return {"x": features, "y": labels, "edges": edges, "edge_list": edge_list, "train_mask": train_mask, "test_mask": test_mask}
+    return {"x": features, "y": labels, "edges": edges, "edge_list": edge_list,
+            "train_mask": train_mask, "test_mask": test_mask,
+            "node_labels": node_labels}
 
 def prepare_syn_data_edges_multiclass(G, labels, train_split, num_classes, if_adj=False):
     existing_node = list(G.nodes)[-1]
